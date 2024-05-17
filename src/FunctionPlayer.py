@@ -22,9 +22,9 @@ channels = 2 # This is practically the only possibility as far as I managed to u
 rate = 192000 # Maximum rate supported by the board
 
 # Define parameters
-frequency = 500 # Works for sinusoidal, triangular and square waves
-duration = 3 # Length in time of the signal
-amplitude = 32000 # Works for all signals
+freq = 500 # Works for sinusoidal, triangular and square waves
+length = 3 # Length in time of the signal
+amp = 32000 # Works for all signals
 
 #
 ##### FUNCTIONS #####
@@ -104,7 +104,7 @@ def generate_square(frequency, duration, amplitude):
 #
 class SinePlayer(Thread):
     '''Class to play a sinusoidal wave.'''
-    def __init__(self, frequency = frequency, duration = duration, amplitude = amplitude):
+    def __init__(self, frequency = freq, duration = length, amplitude = amp):
         Thread.__init__(self, daemon=True)
         self.device = aa.PCM(rate=rate, channels=channels, format=format, periodsize=128*5, cardindex=2)
         # We open the device
@@ -144,7 +144,7 @@ class SinePlayer(Thread):
 
 class ConstPlayer(Thread):
     '''Class to play a constant wave.'''
-    def __init__(self, duration = duration, amplitude = amplitude):
+    def __init__(self, duration = length, amplitude = amp):
         Thread.__init__(self, daemon=True)
         self.device = aa.PCM(rate = rate, channels=channels, format=format, periodsize=128, cardindex=2)
         # We open the device
@@ -161,9 +161,6 @@ class ConstPlayer(Thread):
         Parameters needed:
             - duration  --> approximate duration of the signal in seconds
             - amplitude --> amplitude of the signal. The maximum value depends on the resolution we set (e.g for S24int is approx. 8 millions)'''
-
-        if frequency > rate / 2:
-            raise ValueError('maximum frequency is %d' % (rate / 2))
 
         buf = generate_constant(duration, amplitude)
         self.queue.put(buf)
@@ -183,7 +180,7 @@ class ConstPlayer(Thread):
 
 class TriangularPlayer(Thread):
     '''Class to play a triangular wave.'''
-    def __init__(self, frequency = frequency, duration = duration, amplitude = amplitude):
+    def __init__(self, frequency = freq, duration = length, amplitude = amp):
         Thread.__init__(self, daemon=True)
         self.device = aa.PCM(rate = rate, channels=channels, format=format, periodsize=128, cardindex=2)
         # We open the device
@@ -222,7 +219,7 @@ class TriangularPlayer(Thread):
 
 class SquarePlayer(Thread):
     '''Class to play a square wave.'''
-    def __init__(self, frequency = frequency, duration = duration, amplitude = amplitude):
+    def __init__(self, frequency = freq, duration = length, amplitude = amp):
         Thread.__init__(self, daemon=True)
         self.device = aa.PCM(rate = rate, channels=channels, format=format, periodsize=128, cardindex=2)
         # We open the device
