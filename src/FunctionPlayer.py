@@ -23,7 +23,6 @@ rate = 192000 # Maximum rate supported by the board
 
 # Define parameters
 freq = 500 # Works for sinusoidal, triangular and square waves
-length = 3 # Length in time of the signal
 amp = 32000 # Works for all signals
 
 #
