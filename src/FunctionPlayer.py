@@ -15,8 +15,8 @@ from threading import Thread
 
 # Initialization of some values
 # Format parameters
-format = aa.PCM_FORMAT_S24_LE # Signed 16 bit integer in Little Endian format
-pack_format = 'l' # short int (2 bytes) matching the format
+format = aa.PCM_FORMAT_S24_LE # Signed 24 bit integer in Little Endian format
+pack_format = 'l' # long int (4 bytes) to convert the data to bytes
 
 channels = 2 # This is practically the only possibility as far as I managed to understand :|
 rate = 192000 # Maximum rate supported by the board
