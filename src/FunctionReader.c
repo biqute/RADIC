@@ -4,18 +4,18 @@
 
 #define ALSA_PCM_NEW_HW_PARAMS_API
 
-int write_data(const char *filename, int *data, int size)
+int write_data(const char *filename, short *data, int size)
 {
-    FILE *fp = fopen(filename, "wb");
+    FILE *fp = fopen(filename, "w");
     if (fp == NULL)
     {
         perror("fopen failed");
         return 1;
     }
 
-    size_t written = fwrite(data, sizeof(int), size/sizeof(int), fp);
+    size_t written = fwrite(data, sizeof(short), size/sizeof(short), fp);
     printf("Number of data written to file: %d\n", written);
-    if (written != size/sizeof(int))
+    if (written != size/sizeof(short))
     {
         perror("fwrite failed");
         fclose(fp);
@@ -34,7 +34,6 @@ int main(int argc, char *argv[])
     char *device = "hw:2";
     int precision = atoi(argv[1]); // Precision to use. It can be 16, 24 or 32
     int rate = 192000;
-    int channels = 2;
 
     /* 
     Number of loops to capture. 
@@ -71,7 +70,7 @@ int main(int argc, char *argv[])
     }
 
     // We use 2 channels (left audio and right audio)
-    snd_pcm_hw_params_set_channels(capture_handle, hw_params, channels);
+    snd_pcm_hw_params_set_channels(capture_handle, hw_params, 2);
 
     // Here we set our sampling rate.
     snd_pcm_hw_params_set_rate_near(capture_handle, hw_params, &rate, &dir);
@@ -99,35 +98,44 @@ int main(int argc, char *argv[])
     // Now we acquire the data
     if (precision == 16)
     {
-        int dimension = frames * 4;
-        int dataSize = dimension;
-        int data[dimension*sizeof(int)*loops];
+        //int dimension = frames * 4;
+        //int dataSize = dimension;
+        int num_samples = 2*frames*loops;
+        short data[num_samples]; // This will contain all the samples
 
-        printf("Initial data dimension: %ld\n", sizeof(data)/sizeof(int));
+        printf("Number of samples we expect: %i\n", num_samples);
 
         int j = 0;
 
         while (loops > 0)
         {
             loops--;
-            int buffer[dimension*sizeof(int)];
-            int *buf = buffer;
-            rc = snd_pcm_readi(capture_handle, buf, dimension);
+            short buffer[frames];
+            //short *buf = buffer; // This will contain the frames i.e. stuff that contain the samples from the two channels
+            rc = snd_pcm_readi(capture_handle, buffer, frames);
+
+            printf("Number of frames actually read (rc): %i\n", rc);
+            printf("Number of elements in buffer: %i\n", sizeof(buffer)/sizeof(buffer[0]));
+            printf("Dimension of one element in the buffer: %i\n", sizeof(buffer[0]));
 
             if (rc == -EPIPE)
             {
                 perror("Reading failed");
             }
 
-            for (int i = 0; i < rc; i++)
-            {
-                data[j*dimension + i] = buf[i];
+            for (int i = 0; i < rc; i += 2)
+            {   
+                //printf("%hi\n", buffer[i]);
+                data[j*frames + i] = buffer[i];
+                data[j*frames + i + 1] = buffer[i+1];
             }
             
             j++;
         }
+        
+        printf("\tReading process finished\n");
 
-        printf("Reading process finished\n");
+        printf("Size of data: %i\n", sizeof(data)/sizeof(data[0]));
 
         if (write_data("data.txt", data, sizeof(data)) != 0)
         {
