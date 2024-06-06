@@ -1,6 +1,12 @@
 /* 
-Functions that will be called in a Python script to improve the speed and
-most of all to use 24 bit data that in C should be easier to implement :\
+For now it can only generate sine waves. This needs to be upgraded.
+
+gcc FunctionPlayer.c -lasound -lm -o FunctionPlayer
+
+./FunctionPlayer xx yy zz
+    xx --> precision (16 or 24)
+    yy --> time duration of the signal (in seconds)
+    zz --> frequency of the sine wave (in Hz)
 */
 
 #include <stdio.h>
@@ -15,19 +21,20 @@ most of all to use 24 bit data that in C should be easier to implement :\
 
 int main(int argc, char *argv[]) 
 {   
+    // Setting of the parameters
     int precision = atoi(argv[1]);
     int duration = atoi(argv[2]);
     int frequency = atoi(argv[3]);
-    int rate = 192000;
+    int rate = 192000;                             // Work at the maximum possible sampling rate
+    int n_channels = 2;                            // This is really the only choice since I didn't manage to make it works with just 1 channel
     int rc, dir  = 0;
     int max_amplitude = pow(2, precision) / 2 - 1; // Maximum number obtainable with specified precision
     int num_frames = rate * duration;              // Number of frames
-    char *device = "hw:2";
+    char *device = "hw:1";                         // Name of the device
 
-    snd_pcm_t *handle;            // A reference to the sound card
-    snd_pcm_hw_params_t *params;  // Information about hardware params
+    snd_pcm_t *handle;              // A reference to the sound card
+    snd_pcm_hw_params_t *params;    // Information about hardware params
     snd_pcm_uframes_t frames = 512; // The size of the period
-    //snd_pcm_subformat_t subformat = 3;
 
     // Here we open a reference to the sound card
     rc = snd_pcm_open(&handle, device, SND_PCM_STREAM_PLAYBACK, 0);
@@ -57,15 +64,13 @@ int main(int argc, char *argv[])
     {
         snd_pcm_hw_params_set_format(handle, params, SND_PCM_FORMAT_S24_LE);
     }
-    else if (precision == 32)
+    else if (precision == 32) // Not actually used
     {
         snd_pcm_hw_params_set_format(handle, params, SND_PCM_FORMAT_S32_LE);
     }
-
-    //snd_pcm_hw_params_set_subformat(handle, params, SND_PCM_SUBFORMAT_LAST);
     
     // We use 2 channels (left audio and right audio)
-    snd_pcm_hw_params_set_channels(handle, params, 2);
+    snd_pcm_hw_params_set_channels(handle, params, n_channels);
 
     // Here we set our sampling rate.
     snd_pcm_hw_params_set_rate_near(handle, params, &rate, &dir);
@@ -73,7 +78,7 @@ int main(int argc, char *argv[])
     // This sets the period size
     snd_pcm_hw_params_set_period_size_near(handle, params, &frames, &dir);
 
-    // Finally, the parameters get written to the sound card
+    // Parameters get written to the sound card
     rc = snd_pcm_hw_params(handle, params);
     if (rc < 0)
     {
@@ -81,10 +86,9 @@ int main(int argc, char *argv[])
         exit(1);
     }
 
-    int significant_bits = snd_pcm_hw_params_get_sbits(params);
-    printf("Number of significant bits: %i\n", significant_bits);
+    //int significant_bits = snd_pcm_hw_params_get_sbits(params);
+    //printf("Number of significant bits: %i\n", significant_bits);
 
-    // We will do different things depending on the resolution (for now at least 16 bits works)
     if (precision == 16) 
     {
         // This allocates memory to hold our samples
@@ -101,8 +105,8 @@ int main(int argc, char *argv[])
             sample = max_amplitude*y;
 
             // Store the sample in our buffer using Little Endian format
-            // I do it two times because I have two channels
-            buffer[0 + 4 * j] = sample & 0xff; // This operation apparently gives me the last 8 bit of the number contained in sample
+            // Do it two times because we have two channels
+            buffer[0 + 4 * j] = sample & 0xff; // This operation gives me the last 8 bit of the number contained in sample
             buffer[1 + 4 * j] = (sample & 0xff00) >> 8;
             buffer[2 + 4 * j] = sample & 0xff;
             buffer[3 + 4 * j] = (sample & 0xff00) >> 8;
@@ -120,14 +124,8 @@ int main(int argc, char *argv[])
                 j = 0;
             }
         }
-
-        // Play all remaining samples before exitting
-        snd_pcm_drain(handle);
-
-        // Close the sound card handle
-        snd_pcm_close(handle);
     }
-    else if (precision == 32) 
+    else if (precision == 24) 
     {
         // This allocates memory to hold our samples
         char *buffer;
@@ -143,7 +141,8 @@ int main(int argc, char *argv[])
             double y = sin(2 * PI * frequency * x);
             sample = max_amplitude*y;
 
-            // The following two methods to allocate memory are equivalent
+            // Divide the sample created into 4 bytes and assign them to the buffer
+            // Since 24 bit precision and Little Endian format are setted only the lower three bytes should be used
             buffer[0 + 8*j] = sample & 0xff;
             buffer[1 + 8*j] = (sample >> 8) & 0xff;
             buffer[2 + 8*j] = (sample >> 16) & 0xff;
@@ -152,13 +151,6 @@ int main(int argc, char *argv[])
             buffer[5 + 8*j] = (sample >> 8) & 0xff;
             buffer[6 + 8*j] = (sample >> 16) & 0xff;
             buffer[7 + 8*j] = (sample >> 24) & 0xff;
-
-            /*memset(&buffer[0+6*j], sample&0xff, 1);
-            memset(&buffer[1+6*j], (sample>>8)&0xff, 1);
-            memset(&buffer[2+6*j], (sample>>16)&0xff, 1);
-            memset(&buffer[3+6*j], sample&0xff, 1);
-            memset(&buffer[4+6*j], (sample>>8)&0xff, 1);
-            memset(&buffer[5+6*j], (sample>>16)&0xff, 1);*/
 
             // If we have a buffer full of samples, write 1 period of samples to the sound card
             if (j++ == frames)
@@ -173,13 +165,13 @@ int main(int argc, char *argv[])
                 j = 0;
             }
         }
-
-        // Play all remaining samples before exitting
-        snd_pcm_drain(handle);
-
-        // Close the sound card handle
-        snd_pcm_close(handle);
     }
+
+    // Play all remaining samples before exitting
+    snd_pcm_drain(handle);
+
+    // Close the sound card handle
+    snd_pcm_close(handle);
 
     return 0;
 }
