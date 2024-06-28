@@ -1,21 +1,42 @@
 /* 
-gcc functions.c FunctionReader.c -lasound -lm -o FunctionReader
+gcc FunctionReader.c -lasound -lm -o FunctionReader
 
-./FunctionReader xx yy
-    xx --> precision (16 or 24).
+./FunctionReader yy
     yy --> Number of loops to acquire
 */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <alsa/asoundlib.h>
-#include "functions.h"
 
 #define ALSA_PCM_NEW_HW_PARAMS_API
+
+int write_data_24(const char *filename, long long *data, int size)
+{
+    FILE *fp = fopen(filename, "wb");
+    if (fp == NULL)
+    {
+        perror("fopen failed");
+        return 1;
+    }
+
+    size_t written = fwrite(data, sizeof(long long), size/sizeof(long long), fp);
+    printf("Number of data written to file: %d\n", written);
+    if (written != size/sizeof(long long))
+    {
+        perror("fwrite failed");
+        fclose(fp);
+        return 1;
+    }
+
+    fclose(fp);
+    return 0;
+}
 
 int main(int argc, char *argv[]) 
 {
 //***************** Set the parameters and the board **********************//
-    int precision = atoi(argv[1]);
+    int precision = 24;
     int err;
     int rc, dir = 0;
     char *device = "hw:CARD=sndrpihifiberry,DEV=0";  // Name of the device
@@ -26,7 +47,7 @@ int main(int argc, char *argv[])
         1 loop means that we capture 512 frames which corresponds to approx. 3 ms of data with specified sampling rate
         To aquire around 1 second of data we have to acquire 375 loops
     */
-    int loops = atoi(argv[2]);       
+    int loops = atoi(argv[1]);       
 
     snd_pcm_t *capture_handle;       // Reference to the sound card
     snd_pcm_hw_params_t *hw_params;  // Information about hardware parameters
@@ -60,7 +81,7 @@ int main(int argc, char *argv[])
     // This sets the period size
     snd_pcm_hw_params_set_period_size(capture_handle, hw_params, frames, dir);
 
-    snd_pcm_hw_params_set_periods(capture_handle, hw_params, 16, dir);
+    snd_pcm_hw_params_set_periods(capture_handle, hw_params, 19, dir);
 
     // Finally, the parameters get written to the sound card
     rc = snd_pcm_hw_params(capture_handle, hw_params);
@@ -87,7 +108,36 @@ int main(int argc, char *argv[])
     printf("Period size in frames: %i\n", frames);
 
 //*************************************************************************//    
-    acquire_data(capture_handle, frames, loops, precision);
+
+    int num_samples = frames*loops;
+    long long data[num_samples]; // This will contain all the samples
+    int j = 0;
+
+    while (loops > 0)
+    {
+        loops--;
+        long long buffer[frames];
+        rc = snd_pcm_readi(capture_handle, buffer, frames);
+
+        if (rc == -EPIPE || rc == -EBADFD || rc == -ESTRPIPE) 
+        {
+            perror("Reading failed");
+        }
+
+        for (int i = 0; i < rc; i++)
+        {   
+            data[j*frames + i] = buffer[i];
+        }
+            
+        j++;
+    }
+        
+    printf("\tReading process finished\n");
+
+    if (write_data_24("data.txt", data, sizeof(data)) != 0)
+    {
+        return 1;
+    }
 
     snd_pcm_close(capture_handle);
 
