@@ -3,11 +3,14 @@
 import subprocess
 import threading
 import time
+import os
 
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.fft import rfft, rfftfreq
 from scipy.signal import find_peaks
+from math import pi
+import scipy.constants as sc
 
 maxval = (2**24)/2-1
 
@@ -15,6 +18,10 @@ class FunctionPlayer():
     def __init__(self):
         self.options = {}
         self.filename = './FunctionPlayer'
+
+    #
+    #  Set the options for the writing process
+    #
 
     def help_request(self):
         '''Help function'''
@@ -62,11 +69,14 @@ class FunctionPlayer():
     def set_format(self, format = 'S24_LE'):
         self.options.update({"-o": format})
 
-    def verbose(self):
-        self.options.update({"-v": ''})
+    def verbose(self, v = False):
+        if v == True:
+            self.options.update({"-v": ''})
 
+    # Command the board to play the data
     def set_play(self):
         command = [self.filename]
+        print(self.options)
         for option, value in self.options.items():
             command.append(option)
             command.append(str(value))
@@ -77,7 +87,7 @@ class FunctionPlayer():
         result.stdout
 
     def play(self):
-        play_thread = threading.Thread(target = self.set_play)
+        play_thread = threading.Thread(target = self.set_play, args=())
         play_thread.start()
 
 
@@ -101,13 +111,22 @@ class FunctionReader():
         result.stdout
 
     def read(self):
-        read_thread = threading.Thread(target = self.set_read)
+        read_thread = threading.Thread(target = self.set_read, args=())
         read_thread.start()
+        read_thread.join()
 
-def data_analysis(verbose = 0, rate = 192000):
+def snr(signal, axis=0, ddof=0):
+    signal = np.asanyarray(signal)
+    m = signal.mean(axis)
+    sd = signal.std(axis=axis, ddof=ddof)
+    return 20*np.log10(abs(np.where(sd == 0, 0, m/sd)))
+
+def data_analysis(frequency, verbose = 0, rate = 192000):
     # Reading of the data 
-    with open("data.txt", "rb") as f:
+    with open('data.txt', "rb") as f:
         data = f.read()
+
+    f.close()
 
     # Extract 24 bit data from 4 bytes data
     listed = [data[i:i+4] for i in range(0,len(data), 4)]
@@ -124,15 +143,17 @@ def data_analysis(verbose = 0, rate = 192000):
     data_array_0 = [int.from_bytes(b, byteorder='little', signed=True) for b in listed_2[::2]]
     data_array_1 = [int.from_bytes(c, byteorder='little', signed=True) for c in listed_2[1::2]]
 
+    plot_option = 4
+
     # Show data
     plt.plot(data_array_0, 'o', markersize = 1)
     plt.title('Channel 0');
-    plt.xlim(0,int(len(data_array_0)/5));
+    plt.xlim(0,int(plot_option*rate/frequency));
     plt.show()
 
     plt.plot(data_array_1, 'o', markersize = 1)
     plt.title('Channel 1');
-    plt.xlim(0,int(len(data_array_1)/5));
+    plt.xlim(0,int(plot_option*rate/frequency));
     plt.show()
 
     # Spectrum of the signal and peak detection
@@ -144,6 +165,9 @@ def data_analysis(verbose = 0, rate = 192000):
     plt.xscale('log')
     plt.title("Spectrum of the signal")
     plt.show()
+
+    print('S/N of the signal: ', snr(data_array_0))
+    print('\n')
 
     maxima = []
 
