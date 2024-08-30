@@ -1,273 +1,307 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <math.h>
-#include <alsa/asoundlib.h>
+// All the other standard libraries are in "board_setup.h"
+#include "board_setup.h"
+#include "functions.h"
 
-#define sgn(x) (x < 0) ? -1 : (x > 0)
-#define ALSA_PCM_NEW_HW_PARAMS_API
+// Generate a sinusoidal function with specified parameters and assign it to memory areas
+void generate_sine(
+        const snd_pcm_channel_area_t *areas, 
+        snd_pcm_uframes_t offset, 
+        int count, 
+        double *_phase, 
+        int amplitude
+    )
+{
+    static double max_phase = 2. * M_PI;
+    double phase = *_phase;
+    double step = max_phase*frequency/(double)rate;
+    unsigned char *samples[n_channels];
+    int steps[n_channels];
+    unsigned int chn;
+    
+    int format_bits = snd_pcm_format_width(format);
+    int bps = format_bits / 8;
+    int phys_bps = snd_pcm_format_physical_width(format) / 8;
+    int big_endian = snd_pcm_format_big_endian(format) == 1;
+    int to_unsigned = snd_pcm_format_unsigned(format) == 1;
+    int is_float = (format == SND_PCM_FORMAT_FLOAT_LE || format == SND_PCM_FORMAT_FLOAT_BE);
 
-// ************************* Writing Functions ************************* //
+    // Verify and preapare the contents of areas
+    for (chn = 0; chn < n_channels; chn++) {
+        if ((areas[chn].first % 8) != 0) {
+            printf("areas[%u].first == %u, aborting...\n", chn, areas[chn].first);
+            exit(EXIT_FAILURE);
+        }
+        samples[chn] = /*(signed short *)*/(((unsigned char *)areas[chn].addr) + (areas[chn].first / 8));
+        if ((areas[chn].step % 16) != 0) {
+            printf("areas[%u].step == %u, aborting...\n", chn, areas[chn].step);
+            exit(EXIT_FAILURE);
+        }
+        steps[chn] = areas[chn].step / 8;
+        samples[chn] += offset * steps[chn];
+    }
 
-void play_sin(snd_pcm_t *handle, int frames, int num_frames, double rate, double frequency, int max_amplitude, int precision)
-{   
-    float PI = 3.14159;
-    if (precision == 24)
+    // Fill the channels areas
+    while (count-- > 0) {
+        union {
+            float f;
+            int i;
+        } fval;
+        int res, i;
+        if (is_float) {
+            fval.f = sin(phase);
+            res = fval.i;
+        } else
+            res = sin(phase) * amplitude;
+        if (to_unsigned)
+            res ^= 1U << (format_bits - 1);
+        for (chn = 0; chn < n_channels; chn++) {
+            /* Generate data in native endian format */
+            if (big_endian) {
+                for (i = 0; i < bps; i++)
+                    *(samples[chn] + phys_bps - 1 - i) = (res >> i * 8) & 0xff;
+            } else {
+                for (i = 0; i < bps; i++)
+                    *(samples[chn] + i) = (res >>  i * 8) & 0xff;
+            }
+            samples[chn] += steps[chn];
+        }
+        phase += step;
+        if (phase >= max_phase)
+            phase -= max_phase;
+    }
+    *_phase = phase;
+}
+
+
+// Generate a triangular function with specified parameters and assign it to memory areas
+void generate_triangular(
+        const snd_pcm_channel_area_t *areas, 
+        snd_pcm_uframes_t offset, 
+        int count, 
+        double *_phase, 
+        int amplitude
+    )
+{
+    static double max_phase = 2. * M_PI;
+    double phase = *_phase;
+    double step = max_phase*frequency/(double)rate;
+    unsigned char *samples[n_channels];
+    int steps[n_channels];
+    unsigned int chn;
+    
+    int format_bits = snd_pcm_format_width(format);
+    int bps = format_bits / 8;
+    int phys_bps = snd_pcm_format_physical_width(format) / 8;
+    int big_endian = snd_pcm_format_big_endian(format) == 1;
+    int to_unsigned = snd_pcm_format_unsigned(format) == 1;
+    int is_float = (format == SND_PCM_FORMAT_FLOAT_LE || format == SND_PCM_FORMAT_FLOAT_BE);
+
+    // Verify and preapare the contents of areas
+    for (chn = 0; chn < n_channels; chn++) {
+        if ((areas[chn].first % 8) != 0) {
+            printf("areas[%u].first == %u, aborting...\n", chn, areas[chn].first);
+            exit(EXIT_FAILURE);
+        }
+        samples[chn] = /*(signed short *)*/(((unsigned char *)areas[chn].addr) + (areas[chn].first / 8));
+        if ((areas[chn].step % 16) != 0) {
+            printf("areas[%u].step == %u, aborting...\n", chn, areas[chn].step);
+            exit(EXIT_FAILURE);
+        }
+        steps[chn] = areas[chn].step / 8;
+        samples[chn] += offset * steps[chn];
+    }
+
+    // Fill the channels areas
+    while (count-- > 0) {
+        union {
+            float f;
+            int i;
+        } fval;
+        int res, i;
+        if (is_float) {
+            fval.f = sin(phase);
+            res = fval.i;
+        } else
+            res = asin(sin(phase))*(2*amplitude/M_PI);
+        if (to_unsigned)
+            res ^= 1U << (format_bits - 1);
+        for (chn = 0; chn < n_channels; chn++) {
+            /* Generate data in native endian format */
+            if (big_endian) {
+                for (i = 0; i < bps; i++)
+                    *(samples[chn] + phys_bps - 1 - i) = (res >> i * 8) & 0xff;
+            } else {
+                for (i = 0; i < bps; i++)
+                    *(samples[chn] + i) = (res >>  i * 8) & 0xff;
+            }
+            samples[chn] += steps[chn];
+        }
+        phase += step;
+        if (phase >= max_phase)
+            phase -= max_phase;
+    }
+    *_phase = phase;
+}
+
+// Recovery of the board if an error occours
+int xrun_recovery(snd_pcm_t *handle, int err)
+{
+    if (verbose)
     {
-        char *buffer;
-        int size = frames * 8;
-        buffer = (char *)malloc(size);
-        int j = 0;
-        long sample;
-        for (int i = 0; i < num_frames; i++)
+        printf("stream recovery\n");
+    }
+    if (err == -EPIPE)
+    {
+        err = snd_pcm_prepare(handle);
+        if (err < 0)
         {
-            // Create a sample and convert it back to an integer
-            double x = (double)i / (double)rate;
-            double y = sin(2 * PI * frequency * x);
-            sample = max_amplitude*y;
-
-            // Divide the sample created into 4 bytes and assign them to the buffer
-            // Since 24 bit precision and Little Endian format are setted only the lower three bytes should be used
-            buffer[0 + 8*j] = sample & 0xff;
-            buffer[1 + 8*j] = (sample >> 8) & 0xff;
-            buffer[2 + 8*j] = (sample >> 16) & 0xff;
-            buffer[3 + 8*j] = (sample >> 24) & 0xff;
-            buffer[4 + 8*j] = sample & 0xff;
-            buffer[5 + 8*j] = (sample >> 8) & 0xff;
-            buffer[6 + 8*j] = (sample >> 16) & 0xff;
-            buffer[7 + 8*j] = (sample >> 24) & 0xff;
-
-            // If we have a buffer full of samples, write 1 period of samples to the sound card
-            if (j++ == frames)
-            {   
-                j = snd_pcm_writei(handle, buffer, frames);
-
-                // Check for under runs
-                if (j < 0)
-                {   
-                    snd_pcm_prepare(handle);
-                }
-                j = 0;
+            printf("An error occurred: %s\n", snd_strerror(err));
+        }
+        return 0;
+    }
+    else if (err == -ESTRPIPE)
+    {
+        while ((err == snd_pcm_resume(handle)) == -EAGAIN)
+        {
+            sleep(1);
+        }
+        if (err < 0)
+        {
+            err = snd_pcm_prepare(handle);
+            if (err < 0)
+            {
+                printf("An error occurred: %s\n", snd_strerror(err));
             }
         }
+        return 0;
     }
-    else if (precision == 16)
+    return err;
+}
+
+
+// Write data to the board
+int write_loop(snd_pcm_t *handle, signed long *samples, snd_pcm_channel_area_t *areas, 
+                unsigned int seconds, char *type, unsigned int amplitude, char *write_type)
+{
+    double phase = 0;
+    signed long *ptr;
+    int err, cptr;
+    int loops = 375*seconds;
+
+    if (*write_type == 'c')
     {
-        char *buffer;
-        int size = frames * 4;
-        buffer = (char *)malloc(size);
-        int j = 0;
-        short sample;
-        for (int i = 0; i < num_frames; i++)
-        {
-            // Create a sample and convert it back to an integer
-            double x = (double)i / (double)rate;
-            double y = sin(2 * PI * frequency * x);
-            sample = max_amplitude*y;
-
-            // Divide the sample created into 4 bytes and assign them to the buffer
-            // Since 24 bit precision and Little Endian format are setted only the lower three bytes should be used
-            buffer[0 + 4 * j] = sample & 0xff; // This operation gives me the last 8 bit of the number contained in sample
-            buffer[1 + 4 * j] = (sample & 0xff00) >> 8; // This give the first 8 bit in sample
-            buffer[2 + 4 * j] = sample & 0xff;
-            buffer[3 + 4 * j] = (sample & 0xff00) >> 8;
-
-            // If we have a buffer full of samples, write 1 period of samples to the sound card
-            if (j++ == frames)
-            {   
-                j = snd_pcm_writei(handle, buffer, frames);
-
-                // Check for under runs
-                if (j < 0)
-                {   
-                    snd_pcm_prepare(handle);
-                }
-                j = 0;
+        while(1)
+        {   
+            if (*type == 's') 
+            {
+                generate_sine(areas, 0, period_size, &phase, amplitude);
             }
+            else if (*type == 't')
+            {
+                generate_triangular(areas, 0, period_size, &phase, amplitude);
+            }
+            else
+            {
+                printf("Error: wave format not recognized");
+                exit(EXIT_FAILURE);
+            }
+                
+            ptr = samples;
+            cptr = period_size;
+            while (cptr > 0)
+            {
+                err = snd_pcm_writei(handle, ptr, cptr);
+                if (err == -EAGAIN) 
+                    continue;
+                if (err < 0)
+                {
+                    if (xrun_recovery(handle, err) < 0)
+                    {
+                        printf("Write error: %s\n", snd_strerror(err));
+                        exit(EXIT_FAILURE);
+                    }
+                    break;
+                }
+                ptr += err*n_channels;
+                cptr -= err;
+            }
+            loops--;
+        }
+    }
+    else if (*write_type == 'l')
+    {
+        while(loops > 0)
+        {   
+            if (*type == 's') 
+            {
+                generate_sine(areas, 0, period_size, &phase, amplitude);
+            }
+            else if (*type == 't')
+            {
+                generate_triangular(areas, 0, period_size, &phase, amplitude);
+            }
+            else
+            {
+                printf("Error: wave format not recognized");
+                exit(EXIT_FAILURE);
+            }
+                
+            ptr = samples;
+            cptr = period_size;
+            while (cptr > 0)
+            {
+                err = snd_pcm_writei(handle, ptr, cptr);
+                if (err == -EAGAIN) 
+                    continue;
+                if (err < 0)
+                {
+                    if (xrun_recovery(handle, err) < 0)
+                    {
+                        printf("Write error: %s\n", snd_strerror(err));
+                        exit(EXIT_FAILURE);
+                    }
+                    break;
+                }
+                ptr += err*n_channels;
+                cptr -= err;
+            }
+            loops--;
         }
     }
 }
 
-void play_triangular(snd_pcm_t *handle, int frames, int num_frames, double rate, double frequency, int max_amplitude, int precision)
+
+
+// Read data from the board
+int read_loop(snd_pcm_t *capture_handle, snd_pcm_uframes_t frames, int loops, long long *data)
 {
-    float PI = 3.14159;
-    if (precision == 24)
+    int j = 0;
+
+    while (loops > 0)
     {
-        char *buffer;
-        int size = frames * 8;
-        buffer = (char *)malloc(size);
-        int j = 0;
-        long sample;
-        for (int i = 0; i < num_frames; i++)
+        loops--;
+        long long buffer[frames];
+        rc = snd_pcm_readi(capture_handle, buffer, frames);
+
+        if (rc == -EPIPE || rc == -EBADFD || rc == -ESTRPIPE) 
         {
-            // Create a sample and convert it back to an integer
-            double x = 2*max_amplitude/PI;
-            double y = asin(sin(2*PI*frequency*i/rate));
-            sample = x*y;
-
-            // Divide the sample created into 4 bytes and assign them to the buffer
-            // Since 24 bit precision and Little Endian format are setted only the lower three bytes should be used
-            buffer[0 + 8*j] = sample & 0xff;
-            buffer[1 + 8*j] = (sample >> 8) & 0xff;
-            buffer[2 + 8*j] = (sample >> 16) & 0xff;
-            buffer[3 + 8*j] = (sample >> 24) & 0xff;
-            buffer[4 + 8*j] = sample & 0xff;
-            buffer[5 + 8*j] = (sample >> 8) & 0xff;
-            buffer[6 + 8*j] = (sample >> 16) & 0xff;
-            buffer[7 + 8*j] = (sample >> 24) & 0xff;
-
-            // If we have a buffer full of samples, write 1 period of samples to the sound card
-            if (j++ == frames)
-            {   
-                j = snd_pcm_writei(handle, buffer, frames);
-
-                // Check for under runs
-                if (j < 0)
-                {   
-                    snd_pcm_prepare(handle);
-                }
-                j = 0;
-            }
+            perror("Reading failed");
         }
-    }
-    else if (precision == 16)
-    {
-        char *buffer;
-        int size = frames * 4;
-        buffer = (char *)malloc(size);
-        int j = 0;
-        short sample;
-        for (int i = 0; i < num_frames; i++)
-        {
-            // Create a sample and convert it back to an integer
-            double x = 2*max_amplitude/PI;
-            double y = asin(sin(2*PI*frequency*i/rate));
-            sample = x*y;
 
-            // Divide the sample created into 4 bytes and assign them to the buffer
-            // Since 24 bit precision and Little Endian format are setted only the lower three bytes should be used
-            buffer[0 + 4 * j] = sample & 0xff; // This operation gives me the last 8 bit of the number contained in sample
-            buffer[1 + 4 * j] = (sample & 0xff00) >> 8; // This give the first 8 bit in sample
-            buffer[2 + 4 * j] = sample & 0xff;
-            buffer[3 + 4 * j] = (sample & 0xff00) >> 8;
-
-            // If we have a buffer full of samples, write 1 period of samples to the sound card
-            if (j++ == frames)
-            {   
-                j = snd_pcm_writei(handle, buffer, frames);
-
-                // Check for under runs
-                if (j < 0)
-                {   
-                    snd_pcm_prepare(handle);
-                }
-                j = 0;
-            }
+        for (int i = 0; i < rc; i++)
+        {   
+            data[j*frames + i] = buffer[i];
         }
-    }    
-}
-
-void play_square(snd_pcm_t *handle, int frames, int num_frames, double rate, double frequency, int max_amplitude, int precision)
-{
-    float PI = 3.14159;
-    if (precision == 24)
-    {
-        char *buffer;
-        int size = frames * 8;
-        buffer = (char *)malloc(size);
-        int j = 0;
-        long sample;
-        for (int i = 0; i < num_frames; i++)
-        {
-            // Create a sample and convert it back to an integer
-            float y = sin(2*PI*(float)frequency*i/(float)rate);
-            sample = max_amplitude*(sgn(y));
-
-            // Divide the sample created into 4 bytes and assign them to the buffer
-            // Since 24 bit precision and Little Endian format are setted only the lower three bytes should be used
-            buffer[0 + 8*j] = sample & 0xff;
-            buffer[1 + 8*j] = (sample >> 8) & 0xff;
-            buffer[2 + 8*j] = (sample >> 16) & 0xff;
-            buffer[3 + 8*j] = (sample >> 24) & 0xff;
-            buffer[4 + 8*j] = sample & 0xff;
-            buffer[5 + 8*j] = (sample >> 8) & 0xff;
-            buffer[6 + 8*j] = (sample >> 16) & 0xff;
-            buffer[7 + 8*j] = (sample >> 24) & 0xff;
-
-            // If we have a buffer full of samples, write 1 period of samples to the sound card
-            if (j++ == frames)
-            {   
-                j = snd_pcm_writei(handle, buffer, frames);
-
-                // Check for under runs
-                if (j < 0)
-                {   
-                    snd_pcm_prepare(handle);
-                }
-                j = 0;
-            }
-        }
-    }
-    else if (precision == 16)
-    {
-        char *buffer;
-        int size = frames * 4;
-        buffer = (char *)malloc(size);
-        int j = 0;
-        short sample;
-        for (int i = 0; i < num_frames; i++)
-        {
-            // Create a sample and convert it back to an integer
-            float y = sin(2*PI*(float)frequency*i/(float)rate);
-            sample = max_amplitude*(sgn(y));
-
-            // Divide the sample created into 4 bytes and assign them to the buffer
-            // Since 24 bit precision and Little Endian format are setted only the lower three bytes should be used
-            buffer[0 + 4 * j] = sample & 0xff; // This operation gives me the last 8 bit of the number contained in sample
-            buffer[1 + 4 * j] = (sample & 0xff00) >> 8; // This give the first 8 bit in sample
-            buffer[2 + 4 * j] = sample & 0xff;
-            buffer[3 + 4 * j] = (sample & 0xff00) >> 8;
-
-            // If we have a buffer full of samples, write 1 period of samples to the sound card
-            if (j++ == frames)
-            {   
-                j = snd_pcm_writei(handle, buffer, frames);
-
-                // Check for under runs
-                if (j < 0)
-                {   
-                    snd_pcm_prepare(handle);
-                }
-                j = 0;
-            }
-        }
-    }  
-}
-
-
-// ************************* Reading Functions ************************* //
-int write_data_16(const char *filename, int *data, int size)
-{
-    FILE *fp = fopen(filename, "w");
-    if (fp == NULL)
-    {
-        perror("fopen failed");
-        return 1;
+            
+        j++;
     }
 
-    size_t written = fwrite(data, sizeof(int), size/sizeof(int), fp);
-    printf("Number of data written to file: %d\n", written);
-    if (written != size/sizeof(int))
-    {
-        perror("fwrite failed");
-        fclose(fp);
-        return 1;
-    }
-
-    fclose(fp);
     return 0;
 }
 
-int write_data_24(const char *filename, long long *data, int size)
+
+// Write an array of data to a file
+int data_to_file(const char *filename, long long *data, int size)
 {
     FILE *fp = fopen(filename, "wb");
     if (fp == NULL)
@@ -277,7 +311,7 @@ int write_data_24(const char *filename, long long *data, int size)
     }
 
     size_t written = fwrite(data, sizeof(long long), size/sizeof(long long), fp);
-    printf("Number of data written to file: %d\n", written);
+    printf("Number of frames written to file: %d\n", written);
     if (written != size/sizeof(long long))
     {
         perror("fwrite failed");
@@ -287,72 +321,4 @@ int write_data_24(const char *filename, long long *data, int size)
 
     fclose(fp);
     return 0;
-}
-
-int acquire_data(snd_pcm_t *handle, int frames, int loops, int precision)
-{
-    if (precision == 24)
-    {
-        int num_samples = frames*loops;
-        long long data[num_samples]; // This will contain all the samples
-        int j, rc = 0;
-
-        while (loops > 0)
-        {
-            loops--;
-            long long buffer[frames];
-            rc = snd_pcm_readi(handle, buffer, frames);
-
-            if (rc == -EPIPE || rc == -EBADFD || rc == -ESTRPIPE) 
-            {
-                perror("Reading failed");
-            }
-
-            for (int i = 0; i < rc; i++)
-            {   
-                data[j*frames + i] = buffer[i];
-            }
-            
-            j++;
-        }
-        
-        printf("\tReading process finished\n");
-
-        if (write_data_24("data.txt", data, sizeof(data)) != 0)
-        {
-            return 1;
-        }
-    }
-    else if (precision == 16)
-    {
-        int num_samples = 2*frames*loops;
-        int data[num_samples]; // This will contain all the samples
-        int j = 0;
-        int rc = 0;
-        while (loops > 0)
-        {
-            loops--;
-            int buffer[frames];
-            rc = snd_pcm_readi(handle, buffer, frames);
-
-            if (rc == -EPIPE || rc == -EBADFD || rc == -ESTRPIPE) 
-            {
-                perror("Reading failed");
-            }
-
-            for (int i = 0; i < rc; i++)
-            {   
-                data[j*frames + i] = buffer[i];
-            }
-            
-            j++;
-        }
-        
-        printf("\tReading process finished\n");
-
-        if (write_data_16("data.txt", data, sizeof(data)) != 0)
-        {
-            return 1;
-        }
-    }
 }
