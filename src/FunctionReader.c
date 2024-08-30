@@ -1,57 +1,99 @@
 /* 
-gcc FunctionReader.c -lasound -lm -o FunctionReader
+gcc functions.c board_setup.c FunctionReader.c -lasound -lm -o FunctionReader
 
-./FunctionReader yy
-    yy --> Number of loops to acquire
+./FunctionReader
 */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <alsa/asoundlib.h>
+#include <getopt.h>
+#include "functions.h"
+#include "board_setup.h"
 
 #define ALSA_PCM_NEW_HW_PARAMS_API
 
-int write_data_24(const char *filename, long long *data, int size)
+struct transfer_method 
 {
-    FILE *fp = fopen(filename, "wb");
-    if (fp == NULL)
-    {
-        perror("fopen failed");
-        return 1;
-    }
+    const char *name;
+    snd_pcm_access_t access;
+    int (*transfer_loop)(snd_pcm_t *capture_handle, snd_pcm_uframes_t frames, int loops, long long *data);
+};
 
-    size_t written = fwrite(data, sizeof(long long), size/sizeof(long long), fp);
-    printf("Number of data written to file: %d\n", written);
-    if (written != size/sizeof(long long))
-    {
-        perror("fwrite failed");
-        fclose(fp);
-        return 1;
-    }
+static struct transfer_method transfer_methods[] = 
+{
+    {"read", SND_PCM_ACCESS_RW_INTERLEAVED, read_loop},
+    {NULL, SND_PCM_ACCESS_RW_INTERLEAVED, NULL}
+};
 
-    fclose(fp);
-    return 0;
+static void help(void)
+{
+    printf(
+        "-h,--help  help\n"
+        "-d,--device    name of the device\n"
+        "-l,-loops  number of loops to acquire\n"
+        "-v,--verbose   show the PCM setup parameters\n\n"
+    );
 }
 
 int main(int argc, char *argv[]) 
 {
-//***************** Set the parameters and the board **********************//
-    int precision = 24;
-    int err;
-    int rc, dir = 0;
-    char *device = "hw:CARD=sndrpihifiberry,DEV=0";  // Name of the device
-    int rate = 192000;      // Use maximum samplig rate
 
-    /* 
-    Number of loops to capture. 
-        1 loop means that we capture 512 frames which corresponds to approx. 3 ms of data with specified sampling rate
-        To aquire around 1 second of data we have to acquire 375 loops
-    */
-    int loops = atoi(argv[1]);       
+    struct option long_option[] = 
+    {
+        {"help", 0, NULL, 'h'},
+        {"device", 1, NULL, 'd'},
+        {"loops", 1, NULL, 'l'},
+        {"verbose", 1, NULL, 'v'},
+        {NULL, 0, NULL, 0},
+    };
 
     snd_pcm_t *capture_handle;       // Reference to the sound card
     snd_pcm_hw_params_t *hw_params;  // Information about hardware parameters
     snd_pcm_uframes_t frames = 512;  // The size of the period
+
+    snd_pcm_hw_params_malloc(&hw_params);
+
+    int morehelp = 0;
+
+    while (1) 
+    {
+        int c;
+        if ((c = getopt_long(argc, argv, "hd:l:v", long_option, NULL)) < 0)
+            break;
+        switch (c)
+        {
+        case 'h':
+            morehelp++;
+            break;
+        case 'd':
+            device = strdup(optarg);
+            break;
+        case 'l':
+            loops = atoi(optarg);
+            break;
+        case 'v':
+            verbose = 1;
+            break;
+        }
+    }
+
+    if (morehelp)
+    {
+        help();
+        return 0;
+    }
+
+    err = snd_output_stdio_attach(&output, stdout, 0);
+    if (err < 0) {
+        printf("Output failed: %s\n", snd_strerror(err));
+        return 0;
+    }
+
+    printf("Playback device is %s\n", device);
+    printf("Stream parameters are %uHz, %s, %u channels\n", rate, snd_pcm_format_name(format), n_channels);
+    printf("Number of loops acquired: %i\n", loops);
+    printf("Using transfer method: %s\n", transfer_methods[method].name);
 
     if ((err = snd_pcm_open(&capture_handle, device, SND_PCM_STREAM_CAPTURE, 0)) < 0)
     {
@@ -59,85 +101,27 @@ int main(int argc, char *argv[])
         exit(1);
     }
 
-    snd_pcm_hw_params_malloc(&hw_params);
-    snd_pcm_hw_params_any(capture_handle, hw_params);
-    snd_pcm_hw_params_set_access(capture_handle, hw_params, SND_PCM_ACCESS_RW_INTERLEAVED);
-    
-    if (precision == 16)
-    {
-        snd_pcm_hw_params_set_format(capture_handle, hw_params, SND_PCM_FORMAT_S16_LE);
-    }
-    else if (precision == 24)
-    {
-        snd_pcm_hw_params_set_format(capture_handle, hw_params, SND_PCM_FORMAT_S24_LE);
+    if ((err = set_read_hwparameters(capture_handle, hw_params, frames)) < 0) {
+        printf("Setting of hwparams failed: %s\n", snd_strerror(err));
+        exit(EXIT_FAILURE);
     }
 
-    // We use 2 channels (left audio and right audio)
-    snd_pcm_hw_params_set_channels(capture_handle, hw_params, 2);
+    if (verbose > 0)
+        snd_pcm_dump(capture_handle, output);
 
-    // Here we set our sampling rate.
-    snd_pcm_hw_params_set_rate_near(capture_handle, hw_params, &rate, &dir);
-
-    // This sets the period size
-    snd_pcm_hw_params_set_period_size(capture_handle, hw_params, frames, dir);
-
-    snd_pcm_hw_params_set_periods(capture_handle, hw_params, 19, dir);
-
-    // Finally, the parameters get written to the sound card
-    rc = snd_pcm_hw_params(capture_handle, hw_params);
-    if (rc < 0)
-    {
-        fprintf(stderr, "unable to set the hw params: %s\n", snd_strerror(rc));
-        exit(1);
-    }
-
-    if ((err = snd_pcm_prepare(capture_handle)) < 0)
-    {
-        fprintf(stderr, "Cannot prepare audio interfate for use (%s)\n", snd_strerror(err));
-        exit(1);
-    }
-
-    snd_pcm_hw_params_get_buffer_size(hw_params, &frames);
-    printf("Buffer size: %i\n", frames);
-
-    unsigned int periods;
-    snd_pcm_hw_params_get_periods(hw_params, &periods, &dir);
-    printf("Number of periods in the buffer: %lu\n", periods);
-
-    snd_pcm_hw_params_get_period_size(hw_params, &frames, &dir);
-    printf("Period size in frames: %i\n", frames);
-
-//*************************************************************************//    
+    /*
+     *  Now the actual reading process begins
+    */
 
     int num_samples = frames*loops;
     long long data[num_samples]; // This will contain all the samples
-    int j = 0;
 
-    while (loops > 0)
-    {
-        loops--;
-        long long buffer[frames];
-        rc = snd_pcm_readi(capture_handle, buffer, frames);
+    read_loop(capture_handle, frames, loops, data);
 
-        if (rc == -EPIPE || rc == -EBADFD || rc == -ESTRPIPE) 
-        {
-            perror("Reading failed");
-        }
+    printf("Reading process finished\n");
 
-        for (int i = 0; i < rc; i++)
-        {   
-            data[j*frames + i] = buffer[i];
-        }
-            
-        j++;
-    }
-        
-    printf("\tReading process finished\n");
-
-    if (write_data_24("data.txt", data, sizeof(data)) != 0)
-    {
+    if (data_to_file("data.txt", data, sizeof(data)) != 0)
         return 1;
-    }
 
     snd_pcm_close(capture_handle);
 
