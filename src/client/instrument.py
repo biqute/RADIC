@@ -1,6 +1,6 @@
 """
 This is the script to control the DAC+ADC board. 
- - We need to find a name for it beacuse I don't like "instrument.py".
+ - Need to find a name for it beacuse I don't like "instrument.py".
  - Maybe I can implement some command for closing the server remotely 
         --> Something similar to close_audio.sh
         --> Don't know if it's doable or even useful.
@@ -36,9 +36,11 @@ class Marcj(Client):
     def set_wave(self, opt: str) -> dict:
         """Sets the type of wave to be generated.\n
         Valid options to query:\n
-        - SIN: sinusoidal wave\n
-        - TRIA: triangular wave"""
-        self.validate_opt(opt, ('SIN', 'TRIA'))
+        - `SIN`: sinusoidal wave\n
+        - `TRIA`: triangular wave\n
+        - `SQUA`: square wave\n
+        - `CONST`: constant wave"""
+        self.validate_opt(opt, ('SIN', 'TRIA', 'SQUA', 'CONST'))
         return self.query('SOUR:FUNC:' + str(opt) + '?')
     
     def set_amplitude(self, ampl: float) -> dict:
@@ -49,16 +51,11 @@ class Marcj(Client):
         """Sets the offset of the signal in Volts"""
         return self.query(f"SOUR:OFFSET:{offset}V?")
     
-    ## I don't think this is necessary since this is used only client-side and the server does not need this value.
-    #def set_means(self, n: int) -> dict:
-    #    '''Sets the number n of acquisition that will be used to compute the IV curve.'''
-    #    return self.query(f'SENS:AVER:COUN{n}?')
-    
     def play(self, opt: str = 'CONT') -> dict:
         """Initiate the stream of data with selected mode\n
         Valid options to query:\n
-        - CONT: continuous writing of the data\n
-        - LIM: time limited writing of the data"""
+        - `CONT`: continuous writing of the data\n
+        - `LIM`: time limited writing of the data"""
         self.validate_opt(opt, ("CONT", "LIM"))
         return self.query("INIT:" + str(opt) + "?")
     
