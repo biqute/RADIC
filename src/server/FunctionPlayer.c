@@ -17,7 +17,7 @@
 #include <sys/time.h>
 
 #ifndef M_PI
-    #define M_PI 3.14159265358979323846
+    #define M_PI 3.14159
 #endif
 
 #define maxvalue 8388607
@@ -220,6 +220,8 @@ static void generate_square(const snd_pcm_channel_area_t *areas, snd_pcm_uframes
         samples[chn] += offset * steps[chn];
     }
 
+
+
     // Fill the channels areas
     while (count-- > 0) {
         union {
@@ -235,6 +237,79 @@ static void generate_square(const snd_pcm_channel_area_t *areas, snd_pcm_uframes
         else
         {
             res = amplitude*(2/M_PI*atan(tan(phase)) + 2/M_PI*atan(cos(phase)/sin(phase)));
+        }
+        if (to_unsigned)
+            res ^= 1U << (format_bits - 1);
+        for (chn = 0; chn < n_channels; chn++) {
+            /* Generate data in native endian format */
+            if (big_endian) {
+                for (i = 0; i < bps; i++)
+                    *(samples[chn] + phys_bps - 1 - i) = (res >> i * 8) & 0xff;
+            } else {
+                for (i = 0; i < bps; i++)
+                    *(samples[chn] + i) = (res >>  i * 8) & 0xff;
+            }
+            samples[chn] += steps[chn];
+        }
+        phase += step;
+        if (phase >= max_phase)
+            phase -= max_phase;
+    }
+    *_phase = phase;
+}
+
+/*
+ *  Generate a constant function with specified parameters and assign it to memory areas
+*/
+static void generate_constant(const snd_pcm_channel_area_t *areas, snd_pcm_uframes_t offset, int count, double *_phase, int amplitude, int dc_offset)
+{
+
+    static double max_phase = 2. * M_PI;
+    double phase = *_phase;
+    double step = max_phase*frequency/(double)rate;
+    unsigned char *samples[n_channels];
+    int steps[n_channels];
+    unsigned int chn;
+    
+    int format_bits = snd_pcm_format_width(format);
+    int bps = format_bits / 8;
+    int phys_bps = snd_pcm_format_physical_width(format) / 8;
+    int big_endian = snd_pcm_format_big_endian(format) == 1;
+    int to_unsigned = snd_pcm_format_unsigned(format) == 1;
+    int is_float = (format == SND_PCM_FORMAT_FLOAT_LE || format == SND_PCM_FORMAT_FLOAT_BE);
+
+    // Verify and preapare the contents of areas
+    for (chn = 0; chn < n_channels; chn++) {
+        if ((areas[chn].first % 8) != 0) {
+            printf("areas[%u].first == %u, aborting...\n", chn, areas[chn].first);
+            exit(EXIT_FAILURE);
+        }
+        samples[chn] = /*(signed short *)*/(((unsigned char *)areas[chn].addr) + (areas[chn].first / 8));
+        if ((areas[chn].step % 16) != 0) {
+            printf("areas[%u].step == %u, aborting...\n", chn, areas[chn].step);
+            exit(EXIT_FAILURE);
+        }
+        steps[chn] = areas[chn].step / 8;
+        samples[chn] += offset * steps[chn];
+    }
+
+
+
+    // Fill the channels areas
+    while (count-- > 0) {
+        union {
+            float f;
+            int i;
+        } fval;
+        int res, i;
+        if (is_float) 
+        {
+            fval.f = sin(phase);
+            res = fval.i;
+        } 
+        else
+        {
+            res = amplitude;
         }
         if (to_unsigned)
             res ^= 1U << (format_bits - 1);
@@ -479,6 +554,10 @@ static int write_loop(snd_pcm_t *handle, signed long *samples, snd_pcm_channel_a
             {
                 generate_square(areas, 0, period_size, &phase, amplitude, offset);
             }
+            else if (*type == 'c')
+            {
+                generate_constant(areas, 0, period_size, &phase, amplitude, offset);
+            }
             else
             {
                 printf("Error: wave format not recognized");
@@ -522,6 +601,10 @@ static int write_loop(snd_pcm_t *handle, signed long *samples, snd_pcm_channel_a
             else if (*type == 'q')
             {
                 generate_square(areas, 0, period_size, &phase, amplitude, offset);
+            }
+            else if (*type == 'c')
+            {
+                generate_constant(areas, 0, period_size, &phase, amplitude, offset);
             }
             else
             {
@@ -753,7 +836,7 @@ int main(int argc, char*argv[])
  
     printf("Playback device is %s\n", device);
     printf("Stream parameters are %uHz, %s, %u channels\n", rate, snd_pcm_format_name(format), n_channels);
-    printf("Waveform generated: %s\n", *type == 's' ? "sin" : *type == 't' ? "triangular" : "square");
+    printf("Waveform generated: %s\n", *type == 's' ? "sin" : *type == 't' ? "triangular" :  *type == 'q' ? "square" : "constant");
     printf("Wave frequency is %.4fHz\n", frequency);
     printf("Using transfer method: %s\n", transfer_methods[method].name);
 
