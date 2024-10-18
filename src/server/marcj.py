@@ -39,11 +39,17 @@ def set_device(device: str = "hw:CARD=sndrpihifiberry,DEV=0") -> str:
 def set_waveform(wave: str = "SIN") -> str:
     """Set the waveform to be generated\n.
     "SIN" --> sinusoidal\n
-    "TRIA" --> triangular"""
+    "TRIA" --> triangular\n
+    "SQUA" --> square\n
+    "CONST" --> constant"""
     if wave == "SIN":
         write_options.update({"-w": "s"})
     elif wave == "TRIA":
         write_options.update({"-w": "t"})
+    elif wave == "SQUA":
+        write_options.update({"-w": "q"})
+    elif wave == "CONST":
+        write_options.update({"-w": "c"}) 
     return wave
 
 # To be implemented but it also works like this
@@ -52,8 +58,7 @@ def set_rate(rate = 192000):
     write_options.update({"-r": rate})
     return rate
 
-# To be implemented but it also works like this
-
+# To be implemented but it also works like this --> also I don't think it's possibile to make it work with just one channel (don't know if it's even useful)
 def set_num_channels(channels = 2):
     """Set the number of channels"""
     write_options.update({"-c": channels})
