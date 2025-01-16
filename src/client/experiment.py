@@ -10,7 +10,7 @@ This I think can be done by finding the lowest point of the voltage and consider
 ON HOW TO DO THIS CALIBRATION PROCESS.
 """
 
-from ast import Tuple
+from typing import Tuple
 import numpy as np
 import matplotlib.pyplot as plt
 from time import sleep
@@ -18,6 +18,9 @@ from instrument import Marcj
 import os
 from iminuit.cost import LeastSquares
 from iminuit import Minuit
+from scipy.optimize import curve_fit
+from scipy.signal import butter, filtfilt
+
 
 def diode_IV(x, I_0, a, offset):
     return I_0*(np.exp(a*x) - 1) + offset
@@ -97,17 +100,6 @@ class IVCurve():
         # Set common settings of the device
         self.inst.set_wave(self.wave)
         self.inst.set_offset(self.offset) 
-    
-    def first_local_minimum(self, arr):
-        # Check that array has at least three elements
-        if len(arr) < 3:
-            raise ValueError("Array must have at least three elements to have a local minimum.")
-        
-        # Iterate through the array to find the first local minimum
-        for i in range(1, len(arr) - 1):  # Exclude the first and last elements
-            if arr[i - 1] > arr[i] < arr[i + 1]:
-                return i
-        return None  # No local minimum found
 
     def run_experiment(
             self, 
@@ -143,15 +135,14 @@ class IVCurve():
                 while n_cycles*self.acq_cycles < self.averages:
                     self.acq_cycles +=1
 
-                self.inst.play(self.play_type)
-
                 #print(f"We need {self.acq_cycles} acquistion cycles.")
 
                 if self.acq_cycles > 1:
-                    print("The code is about to broke :(")
-                    self.inst.disconnect()
-                    raise ValueError("You chose too many averages with respect to the acquisition time and/or frequency\n"
-                                    "Try reducing the number of averages or increasing the acquisition time")
+                    print("WARNING: You chose too many averages with respect to the acquisition time and/or frequency\n"
+                          f"It will be used {n_cycles} as a number of averages.")
+                    self.averages = n_cycles
+
+                self.inst.play(self.play_type)
 
                 # "Artificial current vector"
                 current_vector_rise = np.linspace(-a/self.resistance, a/self.resistance, int(np.ceil(n_points/2)))
@@ -160,11 +151,10 @@ class IVCurve():
                 
                 # Now start the acquisition process
                 try: 
-                   # Now start the acquisition process
 
                     # Check if folder exists and in case create it
                     if self.save_data:
-                        path = self.path + f"/freq_{freq}Hz_ampl_{a}V" # each (freq, ampl) is saved in a different folder
+                        path = self.path + f"/freq_{freq}Hz_ampl_{np.round(a,3)}V" # each (freq, ampl) is saved in a different folder
                         if not os.path.exists(path):
                             os.makedirs(path)
 
@@ -201,6 +191,7 @@ class IVCurve():
                         f.close()
                     
                     # Now I have to order the avg_ch0 vector and align it with the currents
+                    # I THINK THAT IS BETTER TO ALIGN THE CURRENT VECTOR TO THE VOLTAGE ONE --> TO BE ADDED
                     min_idx = np.argmin(avg_ch0)
                     V_dut_0 = np.concatenate((avg_ch0[min_idx:], avg_ch0[:min_idx])) # This is the shifted array
                     #V_dut_0 = avg_ch0
@@ -217,19 +208,18 @@ class IVCurve():
 
                         fig, ax1 = plt.subplots();
                         color = "darkblue"
-                        ax1.set_xlabel("time")
-                        ax1.set_ylabel("current [A]", color = color)
-                        ax1.plot(full_current_vector, 'o', markersize=.5, color = color);
+                        ax1.set_xlabel("time [a.u.]")
+                        ax1.set_ylabel(r"current [$\mu$A]", color = color)
+                        ax1.plot(full_current_vector*1e6, 'o', markersize=.5, color = color);
                         ax1.tick_params(axis='y', labelcolor=color)
                         ax2 = ax1.twinx()
                         color = "darkorange"
-                        ax2.set_xlabel("time")
-                        ax2.set_ylabel("amplitude [V]", color = color)
-                        ax2.plot(V_dut_0, 'o', markersize=.5, color = color);
+                        ax2.set_xlabel("time [a.u.]")
+                        ax2.set_ylabel("amplitude [mV]", color = color)
+                        ax2.plot(V_dut_0*1e3, 'o', markersize=.5, color = color);
                         ax2.tick_params(axis='y', labelcolor=color)
                         ax1.grid(alpha=.2)
-                        ax2.grid(alpha=.2)
-                        fig.tight_layout() 
+                        ax2.grid(alpha=.2);
                         plt.savefig(path + f"/IV_averages_{self.averages}_resistance_{self.resistance}Ohm_timetrace.pdf");
                         plt.clf();
                         plt.close();
@@ -247,7 +237,13 @@ class IVCurve():
 
         #self.inst.stop_signal()
 
-    def IV_fit(self, x, y, device: str, path: str):
+    def IV_fit(
+            self, 
+            x: Tuple, 
+            y: Tuple, 
+            device: str,
+            path: str
+        ):
         """Method to fit the IV curve"""
 
         y_errors = .1*np.ones(len(y))
@@ -282,3 +278,189 @@ class IVCurve():
     def close_instrument(self):
         """Closes the instrument."""
         self.inst.disconnect()
+
+
+class LockIn():
+    """Lock-in function of the board"""
+
+    def __init__(
+            self, 
+            inst = Marcj("LockIn"), 
+            freq: int = 500, 
+            ampl: float = [2],
+            offset: float = 0,
+            play_type: str = "CONT",
+            filter_type: str = "default",
+            filter_order: int = 2,
+            cutoff_freq: int = 1000,
+            averages: int = 2,
+            wave: str = "SIN",
+            acq_time: float = 1,
+            acq_cycles: int = 1,
+            sleep_time: float = 1,
+            folder_path: str = "dataLockIn",
+            save_data: bool = True
+        ):
+        """Create an object on which we can run a Lock-In measure.
+        
+        Parameters
+        ----------
+        inst : str (optional)
+            name of the device.
+        freq : int
+            frequency (in Hz) of the signal supplied to the DUT and used as a reference.
+        ampls : tuple
+            amplitude (in V) of the signal supplied to the DUT and used as a reference.
+        offset : float (optional)
+            dc offset of the signal (in V)
+        play_type : str
+            type of data playing. Can be `CONT` for continuous data playing or `LIM` for time limited data playing.
+        filter_type : str
+            type of low-pass filter to use (WILL BE IMPLEMENTED IN THE FUTURE).
+        filer_order : int
+            order of the low-pass filter to use.
+        cutoff_freq : int
+            3dB cutoff frequency of the low-pass filter.
+        averages : int
+            number of averages wanted on the read signal. If the number of averages is set to `0` the program will save 
+            all the data acquired during the "acq_time" period.\n
+            Default is `2` i.e. we average between two cycles.
+        wave : str
+            type of wave to play. Can be `TRIA` for a triangular signal or `SIN` for a sinusoidal signal.
+        acq_time : float
+            sets the length of the data acquisition (in seconds)\n
+            --> note that acquisition longer than approx. 5 seconds may "broke" the code (MAYBE this will be improved in the future).
+        sleep_time : float (optional)
+            sleep time (in seconds).    
+        folder_path : str
+            path of the folder where data will be saved.
+        save_file : bool
+            choose if the data will be saved or not.
+        """
+    
+        self.inst = inst
+        self.freq = freq
+        self.ampl = ampl
+        self.offset = offset
+        self.play_type = play_type
+        self.filter_type = filter_type
+        self.filter_order = filter_order
+        self.cutoff_freq = cutoff_freq
+        self.averages = averages
+        self.wave = wave
+        self.acq_time = acq_time
+        self.acq_cycles = acq_cycles
+        self.sleep_time = sleep_time
+        self.full_data = []
+        self.path = folder_path
+        self.save_data = save_data
+
+        # Now we just connect to the device and set some options
+        try:
+            self.inst.connect()
+
+            self.inst.set_amplitude(self.ampl)
+            self.inst.set_frequency(self.freq)
+            self.inst.set_offset(self.offset)
+            self.inst.set_wave(self.wave)
+        
+        except Exception as error:
+            print(error)
+            self.close_instrument()
+
+    def close_instrument(self):
+        """Closes the instrument."""
+        self.inst.disconnect()
+            
+    def run_LockIN(
+            self,
+            plot : bool = True
+    ):
+        """Run the Lock-In functionality of the board.
+               
+        Parameters
+        ----------
+        plot : bool
+            Choose if you want to save a plot of the results.
+        """
+
+        try:
+            # Play the signal that biases the DUT
+            self.inst.play(self.play_type)
+            sleep(self.sleep_time)
+
+            # Check if folder exists and in case create it
+            if self.save_data:
+                path = self.path + f"/freq_{self.freq}Hz_ampl_{np.round(self.ampl,3)}V"
+                if not os.path.exists(path):
+                    os.makedirs(path)
+
+            # Acquire both the signal from the DUT and the reference signal for at most 5 seconds (IT WILL BE IMPROVED)
+            nloops = self.inst.read_signal(self.acq_time)
+
+            ref_signal = np.array(nloops["ch0"])*self.inst.volt_maxval/self.inst.maxval
+            DUT_signal = np.array(nloops["ch1"])*self.inst.volt_maxval/self.inst.maxval
+
+            t = np.linspace(0, self.acq_time, len(ref_signal)) # Time vectore
+
+            # Write the raw data to a .npz file
+            if self.save_data:
+                np.savez(path+"raw.npz", ref_signal=ref_signal, DUT_signal=DUT_signal, time=t)
+
+            # Shift a copy of the reference signal by pi/2
+            # Fit the reference signal and then shift it
+            def sin_func(x, a, w, p):
+                return a*np.sin(w*x + p)
+            
+            def shift_sin(x, a, w, p):
+                return a*np.sin(w*x + p + np.pi/2)
+
+            params = curve_fit(sin_func, t, ref_signal, p0=[self.ampl, self.freq, 0])
+            amplt_fitted, freq_fitted, phase_fitted = params
+            
+            ref_signal_shifted = np.array(shift_sin(t, amplt_fitted, freq_fitted, phase_fitted))
+
+            # Mix of the signals
+            ref_with_DUT = ref_signal*DUT_signal
+            shifted_ref_with_DUT = ref_signal_shifted*DUT_signal
+
+            # Low-pass filtering
+            nyq = 0.5 * self.inst.max_rate
+            normal_cutoff = self.cutoff_freq / nyq
+            b, a = butter(self.filter_order, normal_cutoff, btype='lowpass')
+
+            filtered_ref_with_DUT = filtfilt(b, a, ref_with_DUT)
+            filtered_shifted_ref_with_DUT = filtfilt(b, a, shifted_ref_with_DUT)
+
+            R = np.sqrt(filtered_ref_with_DUT**2 + filtered_shifted_ref_with_DUT**2)
+            theta = np.atan2(filtered_shifted_ref_with_DUT, filtered_ref_with_DUT)
+
+            reconstructed_signal = R*np.cos(theta)
+
+            # Write the processed data to a .npz file
+            if self.save_data:
+                np.savez(path+"processed.npz", R=R, theta=theta, signal=reconstructed_signal)
+            
+            if plot:
+                plt.plot(filtered_ref_with_DUT, filtered_shifted_ref_with_DUT, 'o', markersize = .5, color = "darkblue");
+                plt.grid(alpha = .2)
+                #plt.title(f"IV of a {device} with frequency {freq} Hz and amplitude {a}V")
+                plt.xlabel("X [V]")
+                plt.ylabel("Y [V]")
+                plt.savefig(path + f"/polar_signal.pdf");
+                plt.clf();
+                plt.close();
+        
+                plt.plot(t, reconstructed_signal, 'o', markersize = .5, color = "darkblue");
+                plt.grid(alpha = .2)
+                #plt.title(f"IV of a {device} with frequency {freq} Hz and amplitude {a}V")
+                plt.xlabel("time [s]")
+                plt.ylabel("amplitude [V]")
+                plt.savefig(path + f"/time_trace.pdf");
+                plt.clf();
+                plt.close();
+
+        except Exception as error:
+            print(error)
+            self.inst.stop_signal()
+            self.close_instrument()
