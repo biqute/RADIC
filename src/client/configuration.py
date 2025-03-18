@@ -10,8 +10,10 @@ def from_env(name: str, default = None):
     """Get the value for an environment variable."""
     return os.getenv(f"Marcj_{name}", default)
 
-address = "10.30.41.155" # Just a placeholder for now
-#address = "0.0.0.0"
+address = "10.30.44.176"
+#address = "10.30.41.155" # For wireless connection via fbk eduroam wifi
+#address = "10.30.78.56" # university eduaroam wifi
+#address = "127.0.1.1"
 port = 7000 # Just a placeholder for now
 
 HOST = from_env("HOST", address)

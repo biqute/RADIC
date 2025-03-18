@@ -8,6 +8,7 @@ This is the script to control the DAC+ADC board.
 
 import configuration as cfg
 from client import Client
+import numpy as np
 
 class Marcj(Client):
     """Defines the commands to set the various board options."""
@@ -18,10 +19,23 @@ class Marcj(Client):
         address: str = cfg.HOST,
         port: int = cfg.PORT
     ):
-        """Initialize the instrument"""
+        """Initialize the instrument.
+        
+        Parameters
+        ----------
+        name: str
+            name of the device (it doesn't really matter it's just nice to have)
+        address: str
+            IP address of the device (it has a default but it can be change if necessary)
+        port: int
+            port used to communicate between server and client (it has a default but it can be change if necessary)
+        """
         super().__init__(name, address, port)
         self.max_rate = 192000
         self.maxval = (2**24)/2 - 1
+        self.volt_maxval = 2.17 * np.sqrt(2)
+        self.rms_val = 5931641
+        self.volt_rms_val = 2.17
 
     def set_frequency(self, freq: float) -> dict:
         '''Sets the frequency f of the signal (in Hz).\n
@@ -39,7 +53,7 @@ class Marcj(Client):
         - `SIN`: sinusoidal wave\n
         - `TRIA`: triangular wave\n
         - `SQUA`: square wave\n
-        - `CONST`: constant wave"""
+        - `CONST`: constant wave --> !can be created but not read!"""
         self.validate_opt(opt, ('SIN', 'TRIA', 'SQUA', 'CONST'))
         return self.query('SOUR:FUNC:' + str(opt) + '?')
     

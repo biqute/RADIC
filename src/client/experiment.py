@@ -1,13 +1,9 @@
 """
 Contains a class that makes it easier to execute an IV curve measuring experiment.
 
-TO-DO:
+THIS WORKS ONLY UP TO 5 SECONDS OF ACQUISITION. THE IMPROVED VERSION IN IS experiment_new.py
 
-OTHER MODIFICATIONS: 
-since the idea is to assoume that we know the current that we provide, we create the "current" 
-vector artificially. This implies that we have to do a calibration to know which voltage point corresponds to what current point. 
-This I think can be done by finding the lowest point of the voltage and considering a period after that --> I'M NOT ENTIRELY SURE 
-ON HOW TO DO THIS CALIBRATION PROCESS.
+CHECK THE I-V PART AND IMPLEMENT IT WITH EXPERIMENT_NEW.PY BECAUSE THERE ARE SOME DIFFERENCES.
 """
 
 from typing import Tuple
@@ -21,20 +17,13 @@ from iminuit import Minuit
 from scipy.optimize import curve_fit
 from scipy.signal import butter, filtfilt
 
-
-def diode_IV(x, I_0, a, offset):
-    return I_0*(np.exp(a*x) - 1) + offset
-
-def resistor_IV(x, R, b):
-    return x/R + b
-
 class IVCurve():
     """IV curve experiment"""
 
     def __init__(
             self, 
-            resistance: int,
-            inst = Marcj("JJ"), 
+            resistance: int = 10000,
+            inst = Marcj("JJ", address="10.30.44.176"), 
             freqs: tuple = [500], 
             ampls: tuple = [2],
             offset: float = 0,
@@ -110,7 +99,7 @@ class IVCurve():
         """Run an IV-curve measure
         
         Parameters
-        ----------
+        ---------- 
         plot : bool
             Choose if you want to save a plot of the results.
         fit : bool
@@ -145,10 +134,14 @@ class IVCurve():
                 self.inst.play(self.play_type)
 
                 # "Artificial current vector"
-                current_vector_rise = np.linspace(-a/self.resistance, a/self.resistance, int(np.ceil(n_points/2)))
-                current_vector_fall = np.linspace(a/self.resistance, -a/self.resistance, int(np.floor(n_points/2)))
-                full_current_vector = np.concat((current_vector_rise, current_vector_fall))
-                
+                current_vector_rise0 = np.linspace(-a/self.resistance, a/self.resistance, int(np.ceil(n_points/2)))
+                current_vector_fall0 = np.linspace(a/self.resistance, -a/self.resistance, int(np.floor(n_points/2)))
+                full_current_vector0 = np.concat((current_vector_rise0, current_vector_fall0))
+
+                current_vector_rise1 = np.linspace(-a/self.resistance, a/self.resistance, int(np.ceil(n_points/2)))
+                current_vector_fall1 = np.linspace(a/self.resistance, -a/self.resistance, int(np.floor(n_points/2)))
+                full_current_vector1 = np.concat((current_vector_rise1, current_vector_fall1))
+ 
                 # Now start the acquisition process
                 try: 
 
@@ -163,15 +156,14 @@ class IVCurve():
                     full_ch0 = np.empty(shape=(self.averages, n_points))
                     full_ch1 = np.empty(shape=(self.averages, n_points))
 
-                    ch0 = np.array(nloops["ch0"])*2.96/self.inst.maxval
-                    ch1 = np.array(nloops["ch1"])*2.96/self.inst.maxval
+                    # Save raw amplitudes that will be converted to voltages later on
+                    ch0 = np.array(nloops["ch0"])*3.05/self.inst.maxval
+                    ch1 = np.array(nloops["ch1"])*3.05/self.inst.maxval
 
-                    # Write the raw data to a .txt file
+                    # Write the raw data to a .npz file
                     if self.save_data:
-                        with open(path + f"/RAW_resistance_{self.resistance}Ohm.txt", "a") as f:
-                            for idx in range(len(ch0)):
-                                f.write(str(ch0[idx]) + " " + str(ch1[idx]) + "\n")
-                        f.close()
+                        np.savez(path + f"/RAW_resistance_{self.resistance}Ohm.npz", raw_ch0=ch0, raw_ch1=ch1)
+
 
                     for avg in range(self.averages):
                         temp_0 = ch0[avg*n_points: n_points + avg*n_points]
@@ -183,26 +175,32 @@ class IVCurve():
                     avg_ch0 = np.mean(full_ch0, axis = 0)
                     avg_ch1 = np.mean(full_ch1, axis = 0)
 
-                    # Write the full data to a .txt file
+                    # Write the full data to a .npz file
                     if self.save_data:
-                        with open(path + f"/AVERAGE_averages_{self.averages}_resistance_{self.resistance}Ohm.txt", "w") as f:
-                            for idx in range(len(avg_ch0)):
-                                f.write(str(avg_ch0[idx]) + " " + str(avg_ch1[idx]) + " " + str(full_current_vector[idx]) + "\n")
-                        f.close()
+                        np.savez(path + f"/AVERAGE_averages_{self.averages}_resistance_{self.resistance}Ohm.npz", 
+                                 avg_ch0=avg_ch0,
+                                 avg_ch1=avg_ch1,
+                                 bias_current0=full_current_vector0,
+                                 bias_current1=full_current_vector1
+                                )
+
                     
                     # Now I have to order the avg_ch0 vector and align it with the currents
                     # I THINK THAT IS BETTER TO ALIGN THE CURRENT VECTOR TO THE VOLTAGE ONE --> TO BE ADDED
-                    min_idx = np.argmin(avg_ch0)
-                    V_dut_0 = np.concatenate((avg_ch0[min_idx:], avg_ch0[:min_idx])) # This is the shifted array
+                    min_idx0 = np.argmin(avg_ch0)
+                    V_dut_0 = np.concatenate((avg_ch0[min_idx0:], avg_ch0[:min_idx0])) # This is the shifted array
+
+                    min_idx1 = np.argmin(avg_ch1)
+                    V_dut_1 = np.concatenate((avg_ch1[min_idx1:], avg_ch1[:min_idx1])) # This is the shifted array
                     #V_dut_0 = avg_ch0
 
                     if plot:
-                        plt.plot(V_dut_0, full_current_vector, 'o', markersize = .5, color = "darkblue");
+                        plt.plot(full_current_vector0, V_dut_0, 'o', markersize = .5, color = "darkblue");
                         plt.grid(alpha = .2)
                         #plt.title(f"IV of a {device} with frequency {freq} Hz and amplitude {a}V")
-                        plt.xlabel("voltage [V]")
-                        plt.ylabel("current [A]")
-                        plt.savefig(path + f"/IV_averages_{self.averages}_resistance_{self.resistance}Ohm.pdf");
+                        plt.ylabel("voltage [V]")
+                        plt.xlabel("current [A]")
+                        plt.savefig(path + f"/IV_averages_{self.averages}_resistance_{self.resistance}Ohm_ch0.pdf");
                         plt.clf();
                         plt.close();
 
@@ -210,7 +208,7 @@ class IVCurve():
                         color = "darkblue"
                         ax1.set_xlabel("time [a.u.]")
                         ax1.set_ylabel(r"current [$\mu$A]", color = color)
-                        ax1.plot(full_current_vector*1e6, 'o', markersize=.5, color = color);
+                        ax1.plot(full_current_vector0*1e6, 'o', markersize=.5, color = color);
                         ax1.tick_params(axis='y', labelcolor=color)
                         ax2 = ax1.twinx()
                         color = "darkorange"
@@ -220,12 +218,39 @@ class IVCurve():
                         ax2.tick_params(axis='y', labelcolor=color)
                         ax1.grid(alpha=.2)
                         ax2.grid(alpha=.2);
-                        plt.savefig(path + f"/IV_averages_{self.averages}_resistance_{self.resistance}Ohm_timetrace.pdf");
+                        plt.savefig(path + f"/IV_averages_{self.averages}_resistance_{self.resistance}Ohm_timetrace_ch0.pdf");
+                        plt.clf();
+                        plt.close();
+                    
+                        plt.plot(full_current_vector1, V_dut_1, 'o', markersize = .5, color = "darkblue");
+                        plt.grid(alpha = .2)
+                        #plt.title(f"IV of a {device} with frequency {freq} Hz and amplitude {a}V")
+                        plt.ylabel("voltage [V]")
+                        plt.xlabel("current [A]")
+                        plt.savefig(path + f"/IV_averages_{self.averages}_resistance_{self.resistance}Ohm_ch1.pdf");
+                        plt.clf();
+                        plt.close();
+
+                        fig, ax1 = plt.subplots();
+                        color = "darkblue"
+                        ax1.set_xlabel("time [a.u.]")
+                        ax1.set_ylabel(r"current [$\mu$A]", color = color)
+                        ax1.plot(full_current_vector1*1e6, 'o', markersize=.5, color = color);
+                        ax1.tick_params(axis='y', labelcolor=color)
+                        ax2 = ax1.twinx()
+                        color = "darkorange"
+                        ax2.set_xlabel("time [a.u.]")
+                        ax2.set_ylabel("amplitude [mV]", color = color)
+                        ax2.plot(V_dut_1*1e3, 'o', markersize=.5, color = color);
+                        ax2.tick_params(axis='y', labelcolor=color)
+                        ax1.grid(alpha=.2)
+                        ax2.grid(alpha=.2);
+                        plt.savefig(path + f"/IV_averages_{self.averages}_resistance_{self.resistance}Ohm_timetrace_ch1.pdf");
                         plt.clf();
                         plt.close();
 
                     if fit:
-                        self.IV_fit(V_dut_0, full_current_vector, device, path)
+                        self.IV_fit(V_dut_0, full_current_vector0, device, path)
 
                     sleep(self.sleep_time)
 
@@ -245,6 +270,12 @@ class IVCurve():
             path: str
         ):
         """Method to fit the IV curve"""
+
+        def diode_IV(x, I_0, a, offset):
+            return I_0*(np.exp(a*x) - 1) + offset
+
+        def resistor_IV(x, R, b):
+            return x/R + b
 
         y_errors = .1*np.ones(len(y))
 
