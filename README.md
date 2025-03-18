@@ -5,8 +5,8 @@ Rapid acquition of Analog Data for In depth JJ Characterization
 
 - Note that all the codes now are in the "I/Odata-hifiberry" branch, not the main one
 - download programs in src/client (they are necessary to control the card and perform the experiment)
-      - experiment.py is the old code we used for the acquistions in the university lab
-      - experiment_new.py is the new code that allows for an arbitrary number of averages
+- experiment.py is the old code we used for the acquistions in the university lab
+- experiment_new.py is the new code that allows for an arbitrary number of averages
 - download "experiment.ipynb" in examples (to control the experiment"
 
 Inside experiment.ipynb
