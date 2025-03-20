@@ -1,5 +1,6 @@
-# RADIC
-Rapid acquition of Analog Data for In depth JJ Characterization
+# Amplification-Free System for High-Resolution Josephson Junction Characterization
+
+# Raspberry Pi + HifiBerry setup
 
 ### To run an experiment
 
