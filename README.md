@@ -3,6 +3,7 @@
 # Raspberry Pi + HifiBerry setup
 The Raspberry Pi will contain the server-side programs. 
 
+# Client side
 
 ### To run an experiment
 
